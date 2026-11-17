@@ -19,6 +19,23 @@ describe("GET /customers/:id/daily-totals", () => {
     ]);
   });
 
+  it("учитывает переход на летнее время: смещение берётся на момент заказа", async () => {
+    // Europe/Berlin: до 29.03.2026 01:00Z — UTC+1, после — UTC+2.
+    // Любое одно смещение на весь период ошибётся в одном из двух заказов.
+    ctx.api.customers.set("c_3", "Europe/Berlin");
+    await postWebhook(ctx.app, apiOrder({ customerId: "c_3", amount: 100, createdAt: "2026-03-27T22:30:00Z" })); // 23:30 CET, 27-е
+    await postWebhook(ctx.app, apiOrder({ customerId: "c_3", amount: 200, createdAt: "2026-03-30T22:30:00Z" })); // 00:30 CEST, 31-е
+
+    const res = await dailyTotals(ctx.app, "c_3", "2026-03-27", "2026-03-31");
+    expect(res.json()).toEqual([
+      { date: "2026-03-27", total: 100 },
+      { date: "2026-03-28", total: 0 },
+      { date: "2026-03-29", total: 0 },
+      { date: "2026-03-30", total: 0 },
+      { date: "2026-03-31", total: 200 },
+    ]);
+  });
+
   it("не учитывает pending и refunded", async () => {
     await postWebhook(ctx.app, apiOrder({ amount: 500 }));
     await postWebhook(ctx.app, apiOrder({ amount: 700, status: "pending" }));
