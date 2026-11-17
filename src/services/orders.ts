@@ -5,14 +5,22 @@ import { parseRub, toKop } from "../utils/money.js";
 import { parseUtc } from "../utils/time.js";
 
 /** Заказ в формате внешнего API (поля, которые нам нужны; остальные игнорируем). */
-const ExternalOrder = z.object({
-  id: z.string().min(1),
-  customerId: z.string().min(1),
-  amount: z.union([z.number(), z.string()]),
-  status: z.enum(["pending", "paid", "refunded"]),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
+const ExternalOrder = z
+  .object({
+    id: z.string().min(1),
+    customerId: z.string().min(1),
+    amount: z.union([z.number(), z.string()]),
+    // Появились недавно: у старых заказов отсутствуют. discountPercent только для справки — net считаем по amountPaid
+    discountPercent: z.union([z.number(), z.string()]).optional(),
+    amountPaid: z.union([z.number(), z.string()]).optional(),
+    status: z.enum(["pending", "paid", "refunded"]),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .refine((o) => o.amountPaid === undefined || Number(o.amountPaid) <= Number(o.amount), {
+    path: ["amountPaid"],
+    message: "amountPaid exceeds amount",
+  });
 
 export type ApplyResult = "created" | "updated" | "stale";
 
@@ -24,10 +32,13 @@ export class OrdersService {
     if (!parsed.success) throw new ValidationError(`invalid order: ${parsed.error.issues.map((i) => i.path.join(".")).join(", ")}`);
     const o = parsed.data;
     try {
+      const amountKop = toKop(parseRub(o.amount));
+      const paidKop = o.amountPaid === undefined ? amountKop : toKop(parseRub(o.amountPaid));
       return {
         id: o.id,
         customerId: o.customerId,
-        amountKop: toKop(parseRub(o.amount)),
+        amountKop,
+        paidKop,
         status: o.status,
         createdAt: parseUtc(o.createdAt),
         updatedAt: parseUtc(o.updatedAt),
